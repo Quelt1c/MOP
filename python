@@ -1,0 +1,281 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import itertools
+
+def get_constraints():
+    """ Get constraints from user input with improved parsing. """
+    constraints = []
+    num_constraints = int(input("Enter the number of constraints: "))
+    
+    for i in range(num_constraints):
+        while True:
+            try:
+                raw_input = input(f"Enter constraint {i+1} (examples: '1 2 10 <=', 'x >= 0', 'y <= 5'): ").strip()
+                
+                # Handle special cases for x and y constraints
+                if raw_input.startswith("x "):
+                    parts = raw_input.split()
+                    if len(parts) == 3 and parts[1] in ["<=", ">="]:
+                        try:
+                            c = float(parts[2])
+                            constraints.append((1, 0, c, parts[1]))
+                            break
+                        except ValueError:
+                            print("❌ Invalid number format!")
+                            continue
+                
+                elif raw_input.startswith("y "):
+                    parts = raw_input.split()
+                    if len(parts) == 3 and parts[1] in ["<=", ">="]:
+                        try:
+                            c = float(parts[2])
+                            constraints.append((0, 1, c, parts[1]))
+                            break
+                        except ValueError:
+                            print("❌ Invalid number format!")
+                            continue
+                
+                # Standard format: a b c sign
+                else:
+                    parts = raw_input.split()
+                    if len(parts) != 4:
+                        print("❌ Invalid format! Please enter: a b c sign (Example: 1 -2 3 <=)")
+                        continue
+                    
+                    try:
+                        a = float(parts[0])
+                        b = float(parts[1])
+                        c = float(parts[2])
+                    except ValueError:
+                        print("❌ Invalid number format! Make sure to enter valid numbers for a, b, and c.")
+                        continue
+                    
+                    sign = parts[3]
+                    if sign not in ["<=", ">="]:
+                        print("❌ Invalid sign! Please enter '<=' or '>='.")
+                        continue
+                    
+                    constraints.append((a, b, c, sign))
+                    break
+                    
+            except Exception as e:
+                print(f"❌ Unexpected error: {e}")
+    
+    return constraints
+
+def get_objective_function():
+    """ Get the objective function coefficients from the user. """
+    while True:
+        try:
+            raw_input = input("Enter objective function (format: a b, for ax + by): ").strip()
+            obj = raw_input.split()
+            if len(obj) != 2:
+                print("❌ Invalid format! Enter two numbers for the objective function.")
+                continue
+            return tuple(map(float, obj))
+        except ValueError:
+            print("❌ Invalid input! Please enter numeric values.")
+
+def find_intersections(constraints):
+    """ Find intersection points of constraint lines and axes. """
+    points = set()
+    
+    # Add origin if it's feasible
+    points.add((0, 0))
+    
+    # Add intersections with axes
+    for a, b, c, _ in constraints:
+        if a != 0:
+            # Intersection with y-axis (x=0)
+            points.add((0, c/b if b != 0 else float('inf')))
+        if b != 0:
+            # Intersection with x-axis (y=0)
+            points.add((c/a if a != 0 else float('inf'), 0))
+    
+    # Add intersections between constraints
+    for (a1, b1, c1, _), (a2, b2, c2, _) in itertools.combinations(constraints, 2):
+        # Check if lines are not parallel
+        det = a1*b2 - a2*b1
+        if abs(det) > 1e-10:  # Not parallel
+            x = (c1*b2 - c2*b1) / det
+            y = (a1*c2 - a2*c1) / det
+            points.add((x, y))
+    
+    # Remove points with infinity
+    return [p for p in points if not (np.isinf(p[0]) or np.isinf(p[1]))]
+
+def check_feasibility(point, constraints):
+    """ Check if a point satisfies all constraints. """
+    x, y = point
+    for a, b, c, sign in constraints:
+        if sign == "<=" and a * x + b * y > c + 1e-10:
+            return False
+        if sign == ">=" and a * x + b * y < c - 1e-10:
+            return False
+    return True
+
+def plot_feasible_region(constraints, feasible_points, opt_min=None, opt_max=None, obj_func=None):
+    """ Plot the feasible region with labeled points and better visualization. """
+    plt.figure(figsize=(10, 8))
+    
+    # Create a grid of points
+    x = np.linspace(-10, 10, 1000)
+    y = np.linspace(-10, 10, 1000)
+    X, Y = np.meshgrid(x, y)
+    
+    # Initialize feasible region mask
+    mask = np.ones_like(X, dtype=bool)
+    
+    # Plot constraints and update mask
+    for i, (a, b, c, sign) in enumerate(constraints):
+        Z = a*X + b*Y
+        if sign == "<=":
+            mask = mask & (Z <= c)
+            label = f"{a}x + {b}y ≤ {c}"
+        else:  # >=
+            mask = mask & (Z >= c)
+            label = f"{a}x + {b}y ≥ {c}"
+        
+        # Plot constraint line
+        if b != 0:
+            y_vals = (c - a * x) / b
+            plt.plot(x, y_vals, label=label)
+        else:  # Vertical line
+            plt.axvline(x=c/a, label=label)
+    
+    # Shade the feasible region
+    plt.imshow(mask, origin='lower', extent=(-10, 10, -10, 10), 
+               alpha=0.3, cmap='Blues', aspect='auto')
+    
+    # Plot the feasible points
+    if feasible_points:
+        x_points = [p[0] for p in feasible_points]
+        y_points = [p[1] for p in feasible_points]
+        plt.scatter(x_points, y_points, color='blue', s=50, zorder=5)
+        
+        # Label each point with rounded values
+        for i, (x, y) in enumerate(feasible_points):
+            z_val = obj_func[0] * x + obj_func[1] * y if obj_func else None
+            label = f"P{i+1}: ({x:.2f}, {y:.2f})"
+            if z_val is not None:
+                label += f"\nZ = {z_val:.2f}"
+            plt.annotate(label, (x, y), textcoords="offset points", 
+                        xytext=(0, 10), ha='center', 
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7))
+    
+    # Highlight optimal points
+    if opt_min:
+        plt.scatter(opt_min[0], opt_min[1], color='red', s=100, zorder=6, marker='*')
+        z_min = obj_func[0] * opt_min[0] + obj_func[1] * opt_min[1] if obj_func else None
+        plt.annotate(f"Min\nZ = {z_min:.2f}", opt_min, textcoords="offset points", 
+                    xytext=(10, 10), ha='center', color='red',
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7))
+    
+    if opt_max:
+        plt.scatter(opt_max[0], opt_max[1], color='green', s=100, zorder=6, marker='*')
+        z_max = obj_func[0] * opt_max[0] + obj_func[1] * opt_max[1] if obj_func else None
+        plt.annotate(f"Max\nZ = {z_max:.2f}", opt_max, textcoords="offset points", 
+                    xytext=(-10, -10), ha='center', color='green',
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7))
+    
+    # Plot the objective function direction from origin (0,0)
+    if obj_func:
+        # Arrow always starts from origin (0,0)
+        arrow_len = 3.0  # Fixed length for visibility
+        dx, dy = obj_func
+        # Normalize for consistent arrow length
+        norm = np.sqrt(dx**2 + dy**2)
+        if norm > 0:
+            dx, dy = dx/norm * arrow_len, dy/norm * arrow_len
+            plt.arrow(0, 0, dx, dy, head_width=0.3, 
+                    head_length=0.5, fc='purple', ec='purple', 
+                    width=0.1, zorder=4, length_includes_head=True)
+            
+            # Objective function label with rounded coefficients
+            plt.annotate(f"Objective\nZ = {obj_func[0]:.1f}x + {obj_func[1]:.1f}y", 
+                        (dx/2, dy/2), 
+                        color='purple', fontweight='bold',
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7))
+    
+    # Set limits and style
+    plt.xlim(-10, 10)
+    plt.ylim(-10, 10)
+    plt.xlabel("X-axis")
+    plt.ylabel("Y-axis")
+    plt.axhline(0, color="black", linewidth=1)
+    plt.axvline(0, color="black", linewidth=1)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend(loc='upper right', bbox_to_anchor=(1.1, 1.1))
+    plt.title("Linear Programming - Feasible Region")
+    plt.tight_layout()
+    plt.show()
+
+def solve_linear_program():
+    """ Solve the linear programming problem using the graphical method. """
+    print("🔹 Linear Programming Solver 🔹")
+    print("-------------------------------")
+    print("Enter constraints in one of these formats:")
+    print("  - Standard form: '1 2 10 <=' means 1x + 2y <= 10")
+    print("  - Single variable: 'x >= 0' or 'y <= 5'")
+    print("-------------------------------")
+    
+    constraints = get_constraints()
+    obj_func = get_objective_function()
+    print(f"\n🔹 Solving for Z = {obj_func[0]:.2f}x + {obj_func[1]:.2f}y")
+    
+    # Find all potential corner points
+    corner_points = find_intersections(constraints)
+    
+    # Check which points are feasible
+    feasible_points = [p for p in corner_points if check_feasibility(p, constraints)]
+    
+    if not feasible_points:
+        print("❌ No feasible solution exists.")
+        # Still try to plot to show why
+        plot_feasible_region(constraints, [], None, None, obj_func)
+        return
+    
+    # Compute objective function values
+    values = {p: obj_func[0] * p[0] + obj_func[1] * p[1] for p in feasible_points}
+    
+    # Find min and max points
+    min_value = min(values.values())
+    max_value = max(values.values())
+    
+    # Find all points with min/max values (to handle multiple solutions)
+    min_points = [p for p in feasible_points if abs(values[p] - min_value) < 1e-10]
+    max_points = [p for p in feasible_points if abs(values[p] - max_value) < 1e-10]
+    
+    # Report results
+    print(f"\n🔹 Found {len(feasible_points)} feasible points:")
+    for i, p in enumerate(feasible_points):
+        print(f"  Point {i+1}: ({p[0]:.2f}, {p[1]:.2f}) → Z = {values[p]:.2f}")
+    
+    print("\n✅ Results:")
+    if len(min_points) > 1:
+        print(f"  Minimum value Z = {min_value:.2f} occurs at multiple points:")
+        for p in min_points:
+            print(f"    ({p[0]:.2f}, {p[1]:.2f})")
+    else:
+        min_point = min_points[0]
+        print(f"  Minimum value at ({min_point[0]:.2f}, {min_point[1]:.2f}) → Z = {min_value:.2f}")
+    
+    if len(max_points) > 1:
+        print(f"  Maximum value Z = {max_value:.2f} occurs at multiple points:")
+        for p in max_points:
+            print(f"    ({p[0]:.2f}, {p[1]:.2f})")
+    else:
+        max_point = max_points[0]
+        print(f"  Maximum value at ({max_point[0]:.2f}, {max_point[1]:.2f}) → Z = {max_value:.2f}")
+    
+    # Plot the feasible region with labeled points
+    plot_feasible_region(
+        constraints, 
+        feasible_points, 
+        min_points[0] if min_points else None,
+        max_points[0] if max_points else None,
+        obj_func
+    )
+
+if __name__ == "__main__":
+    solve_linear_program()
